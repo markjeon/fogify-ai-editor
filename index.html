@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fogify.ai - AI 비디오 모자이크 편집기</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- 헤더 -->
+        <header class="header">
+            <div class="logo">
+                <h1>Fogify.ai</h1>
+                <span class="tagline">AI 기반 비디오 모자이크 편집기</span>
+            </div>
+        </header>
+
+        <!-- 메인 콘텐츠 -->
+        <main class="main-content">
+            <!-- 파일 업로드 영역 -->
+            <section class="upload-section" id="uploadSection">
+                <div class="upload-container">
+                    <div class="upload-area" id="uploadArea">
+                        <div class="upload-icon">
+                            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7,10 12,15 17,10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                        </div>
+                        <h2>비디오 파일을 업로드하세요</h2>
+                        <p>파일을 드래그 앤 드롭하거나 클릭하여 선택하세요</p>
+                        <p class="supported-formats">지원 형식: MP4, MOV, AVI, MKV, WEBM</p>
+                        <input type="file" id="fileInput" accept=".mp4,.mov,.avi,.mkv,.webm" style="display: none;">
+                        <button class="select-file-btn" onclick="document.getElementById('fileInput').click()">
+                            파일 선택
+                        </button>
+                    </div>
+                    
+                    <!-- 업로드 진행률 -->
+                    <div class="upload-progress" id="uploadProgress" style="display: none;">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <div class="progress-text" id="progressText">0%</div>
+                    </div>
+                    
+                    <!-- 에러 메시지 -->
+                    <div class="error-message" id="errorMessage" style="display: none;"></div>
+                </div>
+            </section>
+
+            <!-- 비디오 플레이어 영역 (추후 구현) -->
+            <section class="video-section" id="videoSection" style="display: none;">
+                <div class="video-container">
+                    <video id="videoPlayer" controls></video>
+                    <div class="video-info" id="videoInfo"></div>
+                </div>
+            </section>
+        </main>
+
+        <!-- 푸터 -->
+        <footer class="footer">
+            <p>&copy; 2025 Fogify.ai. All rights reserved.</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
