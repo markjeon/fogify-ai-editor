@@ -1,11 +1,14 @@
-// Fogify.ai 비디오 모자이크 편집기
-// 파일 업로드 및 기본 기능
+// Fogify.ai 비디오 모자이크 편집기 (API 연동 버전)
+// 파일 업로드 및 AI 분석 기능
 
 class FogifyEditor {
     constructor() {
         this.currentFile = null;
         this.supportedFormats = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
         this.maxFileSize = 500 * 1024 * 1024; // 500MB
+        this.apiBaseUrl = 'http://localhost:8000'; // 백엔드 서버 URL
+        this.currentTaskId = null;
+        this.websocket = null;
         
         this.initializeElements();
         this.bindEvents();
@@ -58,7 +61,7 @@ class FogifyEditor {
         });
     }
 
-    handleFileSelect(file) {
+    async handleFileSelect(file) {
         console.log('파일 선택됨:', file);
         
         // 파일 검증
@@ -71,7 +74,7 @@ class FogifyEditor {
         
         // 파일 처리 시작
         this.currentFile = file;
-        this.processFile(file);
+        await this.uploadFileToServer(file);
     }
 
     validateFile(file) {
@@ -103,85 +106,78 @@ class FogifyEditor {
         return true;
     }
 
-    processFile(file) {
-        console.log('파일 처리 시작:', file.name);
+    async uploadFileToServer(file) {
+        console.log('서버로 파일 업로드 시작:', file.name);
         
         // 진행률 표시 시작
         this.showProgress();
+        this.updateProgress(0, '파일 업로드 중...');
         
-        // 파일 읽기 시뮬레이션 (실제로는 여기서 비디오 메타데이터를 추출)
-        this.simulateFileProcessing(file);
-    }
-
-    simulateFileProcessing(file) {
-        let progress = 0;
-        const interval = setInterval(() => {
-            progress += Math.random() * 15;
-            if (progress >= 100) {
-                progress = 100;
-                clearInterval(interval);
-                this.onFileProcessed(file);
+        try {
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            // 파일 업로드 API 호출
+            const response = await fetch(`${this.apiBaseUrl}/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || '파일 업로드에 실패했습니다.');
             }
-            this.updateProgress(progress);
-        }, 200);
-    }
-
-    onFileProcessed(file) {
-        console.log('파일 처리 완료:', file.name);
-        
-        // 진행률 숨기기
-        setTimeout(() => {
+            
+            const result = await response.json();
+            this.currentTaskId = result.task_id;
+            
+            console.log('파일 업로드 완료:', result);
+            
+            // 비디오 정보 표시
+            this.showVideoInfo(result);
+            
+            // 업로드 완료 후 분석 시작
+            this.updateProgress(100, '업로드 완료! AI 분석을 시작합니다...');
+            setTimeout(() => {
+                this.hideProgress();
+                this.showVideoPlayer(file, result.metadata);
+            }, 1000);
+            
+        } catch (error) {
+            console.error('업로드 오류:', error);
+            this.showError(error.message);
             this.hideProgress();
-            this.showVideoPlayer(file);
-        }, 500);
+        }
     }
 
-    showVideoPlayer(file) {
-        // 파일 URL 생성
-        const fileURL = URL.createObjectURL(file);
-        
-        // 비디오 플레이어 설정
-        this.videoPlayer.src = fileURL;
-        
-        // 비디오 메타데이터 로드 이벤트
-        this.videoPlayer.addEventListener('loadedmetadata', () => {
-            this.displayVideoInfo(file);
-        });
-        
-        // 업로드 섹션 숨기고 비디오 섹션 표시
-        this.uploadSection.style.display = 'none';
-        this.videoSection.style.display = 'block';
-        
-        console.log('비디오 플레이어 표시됨');
-    }
-
-    displayVideoInfo(file) {
-        const video = this.videoPlayer;
-        const duration = this.formatDuration(video.duration);
-        const fileSize = this.formatFileSize(file.size);
+    showVideoInfo(uploadResult) {
+        const metadata = uploadResult.metadata;
         
         this.videoInfo.innerHTML = `
             <h3>비디오 정보</h3>
             <div class="info-grid">
                 <div class="info-item">
-                    <strong>파일명:</strong> ${file.name}
+                    <strong>파일명:</strong> ${uploadResult.filename}
                 </div>
                 <div class="info-item">
-                    <strong>길이:</strong> ${duration}
+                    <strong>길이:</strong> ${this.formatDuration(metadata.duration)}
                 </div>
                 <div class="info-item">
-                    <strong>해상도:</strong> ${video.videoWidth} × ${video.videoHeight}
+                    <strong>해상도:</strong> ${metadata.width} × ${metadata.height}
                 </div>
                 <div class="info-item">
-                    <strong>파일 크기:</strong> ${fileSize}
+                    <strong>프레임 수:</strong> ${metadata.frame_count.toLocaleString()}
                 </div>
                 <div class="info-item">
-                    <strong>형식:</strong> ${file.type}
+                    <strong>FPS:</strong> ${metadata.fps.toFixed(2)}
+                </div>
+                <div class="info-item">
+                    <strong>파일 크기:</strong> ${this.formatFileSize(metadata.file_size)}
                 </div>
             </div>
             <div class="action-buttons">
                 <button class="btn btn-primary" onclick="fogifyEditor.startAnalysis()">
-                    AI 분석 시작
+                    AI 얼굴 분석 시작
                 </button>
                 <button class="btn btn-secondary" onclick="fogifyEditor.resetUpload()">
                     다른 파일 선택
@@ -190,9 +186,129 @@ class FogifyEditor {
         `;
     }
 
-    startAnalysis() {
-        console.log('AI 분석 시작');
-        alert('AI 분석 기능은 다음 단계에서 구현됩니다.');
+    showVideoPlayer(file, metadata) {
+        // 파일 URL 생성
+        const fileURL = URL.createObjectURL(file);
+        
+        // 비디오 플레이어 설정
+        this.videoPlayer.src = fileURL;
+        
+        // 업로드 섹션 숨기고 비디오 섹션 표시
+        this.uploadSection.style.display = 'none';
+        this.videoSection.style.display = 'block';
+        
+        console.log('비디오 플레이어 표시됨');
+    }
+
+    async startAnalysis() {
+        if (!this.currentTaskId) {
+            this.showError('분석할 작업이 없습니다. 먼저 파일을 업로드하세요.');
+            return;
+        }
+
+        console.log('AI 분석 시작:', this.currentTaskId);
+        
+        try {
+            // WebSocket 연결 시작
+            this.connectWebSocket();
+            
+            // 분석 시작 API 호출
+            const response = await fetch(`${this.apiBaseUrl}/analyze/${this.currentTaskId}`, {
+                method: 'POST'
+            });
+            
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.detail || '분석 시작에 실패했습니다.');
+            }
+            
+            const result = await response.json();
+            console.log('분석 시작됨:', result);
+            
+            // 진행률 표시
+            this.showProgress();
+            this.updateProgress(0, 'AI 얼굴 분석을 시작합니다...');
+            
+        } catch (error) {
+            console.error('분석 시작 오류:', error);
+            this.showError(error.message);
+        }
+    }
+
+    connectWebSocket() {
+        const wsUrl = `ws://localhost:8000/ws/${this.currentTaskId}`;
+        this.websocket = new WebSocket(wsUrl);
+        
+        this.websocket.onopen = () => {
+            console.log('WebSocket 연결됨');
+        };
+        
+        this.websocket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            console.log('WebSocket 메시지:', data);
+            
+            switch (data.type) {
+                case 'progress':
+                    this.updateProgress(data.progress, data.message);
+                    break;
+                case 'complete':
+                    this.onAnalysisComplete(data.result);
+                    break;
+                case 'error':
+                    this.showError(data.message);
+                    this.hideProgress();
+                    break;
+            }
+        };
+        
+        this.websocket.onerror = (error) => {
+            console.error('WebSocket 오류:', error);
+            this.showError('실시간 연결에 문제가 발생했습니다.');
+        };
+        
+        this.websocket.onclose = () => {
+            console.log('WebSocket 연결 해제됨');
+        };
+    }
+
+    onAnalysisComplete(result) {
+        console.log('분석 완료:', result);
+        
+        this.hideProgress();
+        
+        // 분석 결과 표시
+        const detectionInfo = document.createElement('div');
+        detectionInfo.className = 'analysis-result';
+        detectionInfo.innerHTML = `
+            <h4>🎯 AI 분석 결과</h4>
+            <div class="result-stats">
+                <div class="stat-item">
+                    <strong>감지된 얼굴:</strong> ${result.detection_count}개 구간
+                </div>
+                <div class="stat-item">
+                    <strong>총 프레임:</strong> ${result.total_frames.toLocaleString()}개
+                </div>
+                <div class="stat-item">
+                    <strong>처리 시간:</strong> 완료
+                </div>
+            </div>
+            <div class="next-steps">
+                <button class="btn btn-success" onclick="fogifyEditor.showEditInterface()">
+                    모자이크 편집하기
+                </button>
+            </div>
+        `;
+        
+        this.videoInfo.appendChild(detectionInfo);
+        
+        // WebSocket 연결 해제
+        if (this.websocket) {
+            this.websocket.close();
+        }
+    }
+
+    showEditInterface() {
+        alert('모자이크 편집 인터페이스는 다음 단계에서 구현됩니다!\n\n현재까지 완성된 기능:\n✅ 파일 업로드\n✅ AI 얼굴 감지\n\n다음 단계:\n🔲 모자이크 편집 인터페이스\n🔲 타임라인 네비게이션\n🔲 실시간 미리보기');
     }
 
     resetUpload() {
@@ -202,8 +318,15 @@ class FogifyEditor {
             this.videoPlayer.src = '';
         }
         
+        // WebSocket 연결 해제
+        if (this.websocket) {
+            this.websocket.close();
+            this.websocket = null;
+        }
+        
         // 상태 초기화
         this.currentFile = null;
+        this.currentTaskId = null;
         this.fileInput.value = '';
         
         // UI 초기화
@@ -217,17 +340,16 @@ class FogifyEditor {
 
     showProgress() {
         this.uploadProgress.style.display = 'block';
-        this.updateProgress(0);
     }
 
     hideProgress() {
         this.uploadProgress.style.display = 'none';
     }
 
-    updateProgress(percent) {
+    updateProgress(percent, message = '') {
         const rounded = Math.round(percent);
         this.progressFill.style.width = `${rounded}%`;
-        this.progressText.textContent = `${rounded}%`;
+        this.progressText.textContent = message || `${rounded}%`;
     }
 
     showError(message) {
@@ -266,83 +388,111 @@ class FogifyEditor {
     }
 }
 
-// CSS 스타일 추가 (인라인)
-const additionalStyles = `
+// CSS 스타일 추가 (분석 결과용)
+const analysisStyles = `
 <style>
-.info-grid {
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0.75rem;
-    margin: 1rem 0;
+.analysis-result {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(99, 102, 241, 0.05));
+    border: 1px solid var(--success-color);
+    border-radius: var(--radius);
 }
 
-.info-item {
+.analysis-result h4 {
+    color: var(--success-color);
+    margin-bottom: 1rem;
+    font-size: 1.125rem;
+}
+
+.result-stats {
+    display: grid;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.stat-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0.5rem 0;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid rgba(16, 185, 129, 0.2);
 }
 
-.info-item:last-child {
+.stat-item:last-child {
     border-bottom: none;
 }
 
-.action-buttons {
-    display: flex;
-    gap: 1rem;
-    margin-top: 1.5rem;
-    flex-wrap: wrap;
+.next-steps {
+    text-align: center;
 }
 
-.btn {
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: var(--radius);
-    font-weight: 500;
-    cursor: pointer;
-    transition: var(--transition);
-    font-size: 1rem;
-    flex: 1;
-    min-width: 140px;
-}
-
-.btn-primary {
-    background: var(--primary-color);
+.btn-success {
+    background: var(--success-color);
     color: white;
 }
 
-.btn-primary:hover {
-    background: var(--primary-hover);
+.btn-success:hover {
+    background: #059669;
     transform: translateY(-1px);
     box-shadow: var(--shadow-md);
 }
 
-.btn-secondary {
-    background: var(--surface);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
+.server-status {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius);
+    font-size: 0.875rem;
+    font-weight: 500;
+    z-index: 1000;
 }
 
-.btn-secondary:hover {
-    background: var(--border-color);
-    transform: translateY(-1px);
+.server-online {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--success-color);
+    border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
-@media (max-width: 480px) {
-    .action-buttons {
-        flex-direction: column;
-    }
-    
-    .btn {
-        width: 100%;
-    }
+.server-offline {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--error-color);
+    border: 1px solid rgba(239, 68, 68, 0.3);
 }
 </style>
 `;
 
 // 스타일 추가
-document.head.insertAdjacentHTML('beforeend', additionalStyles);
+document.head.insertAdjacentHTML('beforeend', analysisStyles);
+
+// 서버 상태 확인
+async function checkServerStatus() {
+    try {
+        const response = await fetch('http://localhost:8000/');
+        if (response.ok) {
+            const data = await response.json();
+            showServerStatus('online', `서버 온라인 ${data.model_loaded ? '(모델 로드됨)' : '(모델 로딩 중)'}`);
+        } else {
+            showServerStatus('offline', '서버 오프라인');
+        }
+    } catch (error) {
+        showServerStatus('offline', '서버 연결 실패');
+    }
+}
+
+function showServerStatus(status, message) {
+    let statusEl = document.getElementById('serverStatus');
+    if (!statusEl) {
+        statusEl = document.createElement('div');
+        statusEl.id = 'serverStatus';
+        statusEl.className = 'server-status';
+        document.body.appendChild(statusEl);
+    }
+    
+    statusEl.className = `server-status server-${status}`;
+    statusEl.textContent = message;
+}
 
 // 애플리케이션 초기화
 const fogifyEditor = new FogifyEditor();
@@ -350,4 +500,8 @@ const fogifyEditor = new FogifyEditor();
 // 전역 함수로 노출 (HTML에서 호출용)
 window.fogifyEditor = fogifyEditor;
 
-console.log('Fogify.ai 편집기 초기화 완료');
+// 서버 상태 확인 (5초마다)
+checkServerStatus();
+setInterval(checkServerStatus, 5000);
+
+console.log('Fogify.ai 편집기 (API 연동 버전) 초기화 완료');
